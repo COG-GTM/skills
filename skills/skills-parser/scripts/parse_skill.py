@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
 """
-Skills Parser - Parse Anthropic Skills files into Devin-compatible format
+Skills Parser - Parse Anthropic Skills files and generate Devin playbooks/knowledge
 
 This script parses skill directories following the Anthropic Agent Skills format
-and converts them into Devin-compatible knowledge entries.
+and generates Devin-compatible playbooks (markdown) and knowledge entries (markdown).
 
 Usage:
-    parse_skill.py <skill-directory> [--output <output-file>] [--integrate]
+    parse_skill.py <skill-directory> [--output-dir <output-directory>]
 
 Examples:
     parse_skill.py ./my-skill
-    parse_skill.py ./my-skill --output knowledge_entry.json
-    parse_skill.py ./my-skill --integrate
+    parse_skill.py ./my-skill --output-dir ./devin-output
 """
 
 import argparse
-import json
 import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 
 def extract_frontmatter(content: str) -> tuple[dict, str]:
@@ -44,10 +41,21 @@ def extract_frontmatter(content: str) -> tuple[dict, str]:
     body = match.group(2)
     
     frontmatter = {}
+    current_key = None
+    current_value = []
+    
     for line in frontmatter_text.strip().split('\n'):
-        if ':' in line:
+        if ':' in line and not line.startswith(' ') and not line.startswith('\t'):
+            if current_key:
+                frontmatter[current_key] = ' '.join(current_value).strip()
             key, value = line.split(':', 1)
-            frontmatter[key.strip()] = value.strip()
+            current_key = key.strip()
+            current_value = [value.strip()] if value.strip() else []
+        elif current_key:
+            current_value.append(line.strip())
+    
+    if current_key:
+        frontmatter[current_key] = ' '.join(current_value).strip()
     
     return frontmatter, body
 
@@ -87,7 +95,7 @@ def discover_resources(skill_dir: Path) -> dict:
         skill_dir: Path to the skill directory
         
     Returns:
-        Dictionary with lists of scripts, references, and assets
+        Dictionary with lists of scripts, references, and assets (with paths)
     """
     resources = {
         'scripts': [],
@@ -98,21 +106,24 @@ def discover_resources(skill_dir: Path) -> dict:
     scripts_dir = skill_dir / 'scripts'
     if scripts_dir.exists() and scripts_dir.is_dir():
         resources['scripts'] = [
-            f.name for f in scripts_dir.iterdir() 
+            {'name': f.name, 'path': str(f)}
+            for f in scripts_dir.iterdir() 
             if f.is_file() and not f.name.startswith('.')
         ]
     
     references_dir = skill_dir / 'references'
     if references_dir.exists() and references_dir.is_dir():
         resources['references'] = [
-            f.name for f in references_dir.iterdir() 
+            {'name': f.name, 'path': str(f)}
+            for f in references_dir.iterdir() 
             if f.is_file() and not f.name.startswith('.')
         ]
     
     assets_dir = skill_dir / 'assets'
     if assets_dir.exists() and assets_dir.is_dir():
         resources['assets'] = [
-            f.name for f in assets_dir.iterdir() 
+            {'name': f.name, 'path': str(f)}
+            for f in assets_dir.iterdir() 
             if f.is_file() and not f.name.startswith('.')
         ]
     
@@ -164,63 +175,142 @@ def parse_skill(skill_dir: str) -> dict:
     return parsed_skill
 
 
-def generate_knowledge_entry(parsed_skill: dict) -> dict:
+def generate_devin_playbook(parsed_skill: dict) -> str:
     """
-    Generate a Devin-compatible knowledge entry from parsed skill data.
+    Generate a Devin playbook (markdown) from parsed skill data.
     
     Args:
         parsed_skill: Dictionary containing parsed skill data
         
     Returns:
-        Dictionary formatted as a Devin knowledge entry
+        Markdown string for the Devin playbook
     """
-    knowledge_entry = {
-        'name': parsed_skill['name'],
-        'description': parsed_skill['description'],
-        'content': parsed_skill['content'],
-        'resources': parsed_skill['resources'],
-        'source': parsed_skill['source'],
-        'parsed_at': parsed_skill['parsed_at'],
-        'metadata': {
-            'format': 'anthropic-skills',
-            'version': '1.0',
-            'source_path': parsed_skill['source_path']
-        }
-    }
+    name = parsed_skill['name']
+    description = parsed_skill['description']
+    content = parsed_skill['content']
+    resources = parsed_skill['resources']
     
-    return knowledge_entry
+    playbook = f"""# {name.replace('-', ' ').title()} Playbook
+
+## Description
+
+{description}
+
+## When to Use
+
+Use this playbook when you need to {description.lower().rstrip('.')}
+
+## Instructions
+
+{content}
+"""
+    
+    if resources['scripts']:
+        playbook += "\n## Available Scripts\n\n"
+        for script in resources['scripts']:
+            playbook += f"- `{script['name']}` - Located at `{script['path']}`\n"
+    
+    if resources['references']:
+        playbook += "\n## Reference Documentation\n\n"
+        for ref in resources['references']:
+            playbook += f"- `{ref['name']}` - See `{ref['path']}`\n"
+    
+    if resources['assets']:
+        playbook += "\n## Assets\n\n"
+        for asset in resources['assets']:
+            playbook += f"- `{asset['name']}` - Located at `{asset['path']}`\n"
+    
+    playbook += f"""
+---
+*Generated from Anthropic Skill: {parsed_skill['name']}*
+*Source: {parsed_skill['source_path']}*
+*Generated at: {parsed_skill['parsed_at']}*
+"""
+    
+    return playbook
 
 
-def print_summary(parsed_skill: dict) -> None:
-    """Print a summary of the parsed skill."""
+def generate_devin_knowledge(parsed_skill: dict) -> str:
+    """
+    Generate a Devin knowledge entry (markdown) from parsed skill data.
+    
+    Args:
+        parsed_skill: Dictionary containing parsed skill data
+        
+    Returns:
+        Markdown string for the Devin knowledge entry
+    """
+    name = parsed_skill['name']
+    description = parsed_skill['description']
+    content = parsed_skill['content']
+    resources = parsed_skill['resources']
+    
+    knowledge = f"""# {name.replace('-', ' ').title()}
+
+## Overview
+
+{description}
+
+## Details
+
+{content}
+"""
+    
+    if resources['scripts']:
+        knowledge += "\n## Scripts\n\n"
+        knowledge += "The following scripts are available for this skill:\n\n"
+        for script in resources['scripts']:
+            knowledge += f"- **{script['name']}**: `{script['path']}`\n"
+    
+    if resources['references']:
+        knowledge += "\n## References\n\n"
+        knowledge += "Additional documentation:\n\n"
+        for ref in resources['references']:
+            knowledge += f"- **{ref['name']}**: `{ref['path']}`\n"
+    
+    if resources['assets']:
+        knowledge += "\n## Assets\n\n"
+        knowledge += "Available assets:\n\n"
+        for asset in resources['assets']:
+            knowledge += f"- **{asset['name']}**: `{asset['path']}`\n"
+    
+    knowledge += f"""
+---
+*Source: Anthropic Skill ({parsed_skill['name']})*
+*Original location: {parsed_skill['source_path']}*
+"""
+    
+    return knowledge
+
+
+def print_summary(parsed_skill: dict, playbook_path: str, knowledge_path: str) -> None:
+    """Print a summary of the generated files."""
     desc_preview = parsed_skill['description'][:100]
     if len(parsed_skill['description']) > 100:
         desc_preview += "..."
     
     print(f"\nSuccessfully parsed skill: {parsed_skill['name']}")
-    print(f"  - Name: {parsed_skill['name']}")
     print(f"  - Description: {desc_preview}")
     print(f"  - Scripts: {len(parsed_skill['resources']['scripts'])} files")
     print(f"  - References: {len(parsed_skill['resources']['references'])} files")
     print(f"  - Assets: {len(parsed_skill['resources']['assets'])} files")
+    print()
+    print("Generated Devin files:")
+    print(f"  - Playbook: {playbook_path}")
+    print(f"  - Knowledge: {knowledge_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Parse Anthropic Skills files into Devin-compatible format'
+        description='Parse Anthropic Skills and generate Devin playbooks/knowledge (markdown)'
     )
     parser.add_argument(
         'skill_directory',
         help='Path to the skill directory containing SKILL.md'
     )
     parser.add_argument(
-        '--output', '-o',
-        help='Output file path for the knowledge entry JSON'
-    )
-    parser.add_argument(
-        '--integrate',
-        action='store_true',
-        help='Integrate the skill into Devin\'s knowledge system'
+        '--output-dir', '-o',
+        help='Output directory for generated markdown files (default: current directory)'
     )
     parser.add_argument(
         '--quiet', '-q',
@@ -233,28 +323,25 @@ def main():
     try:
         parsed_skill = parse_skill(args.skill_directory)
         
-        knowledge_entry = generate_knowledge_entry(parsed_skill)
+        playbook_md = generate_devin_playbook(parsed_skill)
+        knowledge_md = generate_devin_knowledge(parsed_skill)
         
-        if args.output:
-            output_path = Path(args.output)
-            output_path.write_text(
-                json.dumps(knowledge_entry, indent=2),
-                encoding='utf-8'
-            )
-            if not args.quiet:
-                print(f"Knowledge entry saved to: {output_path}")
+        output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        skill_name = parsed_skill['name']
+        playbook_path = output_dir / f"{skill_name}-playbook.md"
+        knowledge_path = output_dir / f"{skill_name}-knowledge.md"
+        
+        playbook_path.write_text(playbook_md, encoding='utf-8')
+        knowledge_path.write_text(knowledge_md, encoding='utf-8')
         
         if not args.quiet:
-            print_summary(parsed_skill)
-        
-        if args.integrate:
-            if not args.quiet:
-                print("\nSkill has been added to Devin's knowledge system.")
-                print("You can now use this skill by mentioning it in your requests.")
-        
-        if not args.output and not args.integrate and not args.quiet:
-            print("\nKnowledge entry (JSON):")
-            print(json.dumps(knowledge_entry, indent=2))
+            print_summary(parsed_skill, str(playbook_path), str(knowledge_path))
+            print()
+            print("You can now add these files to Devin:")
+            print(f"  - Add {playbook_path} as a Devin playbook")
+            print(f"  - Add {knowledge_path} as Devin knowledge")
         
         return 0
         

@@ -1,40 +1,72 @@
----
-name: skills-parser
-description: Parse and integrate Anthropic Skills files into Devin's knowledge system. Use this skill when customers want to import skills.md files (following the Anthropic Agent Skills format) into Devin, convert skills from the Anthropic format to Devin-compatible format, or add external skills to Devin's knowledge base. This skill automatically extracts YAML frontmatter metadata, markdown body content, and bundled resources (scripts, references, assets) from skill directories.
----
+# Skills Parser Playbook
 
-# Skills Parser
+This Devin playbook automatically converts Anthropic Skills files into Devin-compatible playbooks and knowledge entries. Use this playbook when you need to integrate any repository that uses the Anthropic Skills format (`/skills` directory with SKILL.md files) into Devin.
 
-This skill provides automated parsing and integration of Anthropic Skills files into Devin's knowledge system, demonstrating full support for the Agent Skills standard.
+## When to Use This Playbook
 
-## Overview
-
-The Skills Parser accepts skill directories containing SKILL.md files (following the Anthropic Agent Skills format) and converts them into Devin-compatible knowledge entries. The parser handles the complete skill structure including metadata, instructions, and bundled resources.
+Run this playbook when:
+- A customer has a repository with Anthropic Skills files (SKILL.md)
+- You need to convert skills from the Anthropic format to Devin playbooks and knowledge
+- You want to automatically generate Devin-compatible markdown files from existing skills
 
 ## Quick Start
 
-To parse and integrate a skill into Devin's knowledge system:
+### Parse a Single Skill
+
+To parse one skill and generate Devin playbook + knowledge files:
 
 ```bash
-python scripts/parse_skill.py <path-to-skill-directory>
+python scripts/parse_skill.py <path-to-skill-directory> --output-dir ./devin-output
 ```
 
-Example:
+This generates two markdown files:
+- `<skill-name>-playbook.md` - A Devin playbook with instructions
+- `<skill-name>-knowledge.md` - A Devin knowledge entry with reference information
+
+### Parse All Skills in a Repository
+
+To parse all skills in a `/skills` directory:
+
 ```bash
-python scripts/parse_skill.py /path/to/my-custom-skill
+python scripts/batch_parse.py <skills-directory> --output-dir ./devin-output
 ```
 
-The script will:
-1. Validate the skill structure
-2. Extract YAML frontmatter (name, description)
-3. Parse the markdown body content
-4. Discover and catalog bundled resources
-5. Generate a Devin-compatible knowledge entry
-6. Provide confirmation of successful integration
+This generates organized output:
+```
+devin-output/
+├── playbooks/
+│   ├── skill1-playbook.md
+│   ├── skill2-playbook.md
+│   └── ...
+└── knowledge/
+    ├── skill1-knowledge.md
+    ├── skill2-knowledge.md
+    └── ...
+```
 
-## Skill Structure Requirements
+## What Gets Generated
 
-The parser expects skills to follow the Anthropic Agent Skills format:
+### Devin Playbooks (markdown)
+
+Each generated playbook includes:
+- Title and description from the original skill
+- "When to Use" section
+- Full instructions from the skill's markdown body
+- List of available scripts with paths
+- Reference documentation links
+- Asset locations
+
+### Devin Knowledge Entries (markdown)
+
+Each generated knowledge entry includes:
+- Overview of the skill
+- Detailed instructions and guidelines
+- Scripts, references, and assets organized by category
+- Source attribution to the original Anthropic Skill
+
+## Input Format (Anthropic Skills)
+
+The parser expects skills following the Anthropic Agent Skills format:
 
 ```
 skill-name/
@@ -42,149 +74,77 @@ skill-name/
 │   ├── YAML frontmatter (name, description)
 │   └── Markdown instructions
 └── Bundled Resources (optional)
-    ├── scripts/          - Executable code (Python/Bash/etc.)
-    ├── references/       - Documentation for context loading
-    └── assets/           - Files used in output (templates, etc.)
+    ├── scripts/          - Executable code
+    ├── references/       - Documentation
+    └── assets/           - Templates, images, etc.
 ```
 
 ### SKILL.md Format
 
-Every SKILL.md must contain:
-
-**YAML Frontmatter** (required):
 ```yaml
 ---
 name: skill-name
-description: Complete description of what the skill does and when to use it
+description: What the skill does and when to use it
 ---
+
+# Skill Title
+
+Instructions and guidelines...
 ```
 
-**Markdown Body** (required):
-Instructions, examples, and guidelines that define the skill's behavior.
+## Validation
 
-## Parsing Workflow
-
-### Step 1: Validate Skill Structure
-
-Before parsing, validate the skill directory:
+Before parsing, you can validate a skill directory:
 
 ```bash
 python scripts/validate_skill.py <path-to-skill-directory>
 ```
 
-This checks:
+Validation checks:
 - SKILL.md exists and is readable
-- YAML frontmatter is valid with required fields
-- Directory structure follows conventions
-- Resource directories are properly organized
+- YAML frontmatter has required `name` and `description` fields
+- Name follows conventions (lowercase, hyphens, max 40 chars)
+- Directory structure is properly organized
 
-### Step 2: Parse and Extract
+## Example Usage
 
-Run the main parser to extract all components:
-
-```bash
-python scripts/parse_skill.py <path-to-skill-directory>
-```
-
-The parser extracts:
-- **Metadata**: name, description from YAML frontmatter
-- **Body**: Full markdown content after frontmatter
-- **Scripts**: List of executable files in scripts/
-- **References**: Documentation files in references/
-- **Assets**: Resource files in assets/
-
-### Step 3: Generate Knowledge Entry
-
-The parser automatically generates a Devin-compatible knowledge entry in JSON format:
+### Single Skill
 
 ```bash
-python scripts/parse_skill.py <path-to-skill-directory> --output knowledge_entry.json
+# Parse the PDF skill
+python scripts/parse_skill.py ./skills/pdf --output-dir ./output
+
+# Output:
+# ./output/pdf-playbook.md
+# ./output/pdf-knowledge.md
 ```
 
-Output format:
-```json
-{
-  "name": "skill-name",
-  "description": "Skill description",
-  "content": "Full markdown body content",
-  "resources": {
-    "scripts": ["script1.py", "script2.sh"],
-    "references": ["api_reference.md", "guide.md"],
-    "assets": ["template.pptx", "logo.png"]
-  },
-  "source": "anthropic-skills",
-  "parsed_at": "2024-01-01T00:00:00Z"
-}
-```
-
-### Step 4: Integrate into Devin
-
-To add the parsed skill to Devin's knowledge system:
+### Batch Processing
 
 ```bash
-python scripts/integrate_skill.py <knowledge_entry.json>
+# Parse all skills in a repository
+python scripts/batch_parse.py ./skills --output-dir ./devin-integration
+
+# Output:
+# ./devin-integration/playbooks/*.md
+# ./devin-integration/knowledge/*.md
 ```
 
-Or use the all-in-one command:
+## Adding Generated Files to Devin
 
-```bash
-python scripts/parse_skill.py <path-to-skill-directory> --integrate
-```
+After running the parser:
 
-## Batch Processing
+1. **Playbooks**: Add the generated `*-playbook.md` files as Devin playbooks in your organization settings
+2. **Knowledge**: Add the generated `*-knowledge.md` files as Devin knowledge entries
 
-To parse multiple skills at once:
+The generated files are ready to use immediately - no additional formatting required.
 
-```bash
-python scripts/batch_parse.py <skills-directory> --output <output-directory>
-```
+## Available Scripts
 
-Example:
-```bash
-python scripts/batch_parse.py ./my-skills --output ./parsed-skills
-```
+- `scripts/parse_skill.py` - Parse a single skill and generate Devin playbook + knowledge
+- `scripts/batch_parse.py` - Parse multiple skills at once
+- `scripts/validate_skill.py` - Validate skill structure before parsing
 
-## Validation Rules
+## Reference Documentation
 
-The parser enforces these validation rules:
-
-1. **Name**: Must be lowercase, hyphen-separated, max 40 characters
-2. **Description**: Must be non-empty and descriptive
-3. **SKILL.md**: Must exist in the skill root directory
-4. **Frontmatter**: Must be valid YAML with `name` and `description` fields
-
-## Error Handling
-
-The parser provides clear error messages for common issues:
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `SKILL.md not found` | Missing main file | Create SKILL.md in skill root |
-| `Invalid YAML frontmatter` | Malformed YAML | Check YAML syntax |
-| `Missing required field: name` | No name in frontmatter | Add `name:` field |
-| `Missing required field: description` | No description | Add `description:` field |
-| `Invalid skill name format` | Name doesn't follow conventions | Use lowercase, hyphens only |
-
-## Integration Confirmation
-
-After successful integration, the parser outputs:
-
-```
-Successfully parsed skill: my-skill-name
-  - Name: my-skill-name
-  - Description: [first 100 chars of description]...
-  - Scripts: 3 files
-  - References: 2 files
-  - Assets: 1 file
-
-Skill has been added to Devin's knowledge system.
-You can now use this skill by mentioning it in your requests.
-```
-
-## Resources
-
-- **scripts/parse_skill.py**: Main parsing script
-- **scripts/validate_skill.py**: Skill validation utility
-- **scripts/integrate_skill.py**: Knowledge system integration
-- **scripts/batch_parse.py**: Batch processing utility
-- **references/skill_format.md**: Detailed format specification
+See `references/skill_format.md` for the complete Anthropic Skills format specification.

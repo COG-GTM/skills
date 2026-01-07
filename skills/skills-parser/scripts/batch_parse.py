@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """
-Batch Skills Parser - Parse multiple Anthropic Skills directories at once
+Batch Skills Parser - Parse multiple Anthropic Skills and generate Devin playbooks/knowledge
 
-This script processes multiple skill directories and generates knowledge entries
-for each, optionally integrating them all into Devin's knowledge system.
+This script processes multiple skill directories and generates Devin-compatible
+playbooks (markdown) and knowledge entries (markdown) for each.
 
 Usage:
-    batch_parse.py <skills-directory> [--output <output-directory>] [--integrate]
+    batch_parse.py <skills-directory> [--output-dir <output-directory>]
 
 Examples:
     batch_parse.py ./my-skills
-    batch_parse.py ./my-skills --output ./parsed-skills
-    batch_parse.py ./my-skills --integrate
+    batch_parse.py ./my-skills --output-dir ./devin-output
 """
 
 import argparse
-import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from parse_skill import parse_skill, generate_knowledge_entry
-from integrate_skill import integrate_skill
+from parse_skill import parse_skill, generate_devin_playbook, generate_devin_knowledge
 
 
 def discover_skills(skills_dir: str) -> list[Path]:
@@ -59,16 +56,14 @@ def discover_skills(skills_dir: str) -> list[Path]:
 def batch_parse(
     skills_dir: str,
     output_dir: str = None,
-    integrate: bool = False,
     continue_on_error: bool = True
 ) -> dict:
     """
-    Parse multiple skills from a directory.
+    Parse multiple skills from a directory and generate Devin playbooks/knowledge.
     
     Args:
         skills_dir: Path to the directory containing skill subdirectories
-        output_dir: Optional path to save parsed knowledge entries
-        integrate: If True, integrate skills into Devin's knowledge system
+        output_dir: Optional path to save generated markdown files
         continue_on_error: If True, continue processing after errors
         
     Returns:
@@ -83,14 +78,17 @@ def batch_parse(
             'parsed': 0,
             'failed': 0,
             'skills': [],
-            'errors': []
+            'errors': [],
+            'generated_files': []
         }
     
-    if output_dir:
-        output_path = Path(output_dir).resolve()
-        output_path.mkdir(parents=True, exist_ok=True)
-    else:
-        output_path = None
+    output_path = Path(output_dir).resolve() if output_dir else Path.cwd()
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    playbooks_dir = output_path / 'playbooks'
+    knowledge_dir = output_path / 'knowledge'
+    playbooks_dir.mkdir(parents=True, exist_ok=True)
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
     
     results = {
         'success': True,
@@ -98,7 +96,8 @@ def batch_parse(
         'parsed': 0,
         'failed': 0,
         'skills': [],
-        'errors': []
+        'errors': [],
+        'generated_files': []
     }
     
     for skill_dir in skill_dirs:
@@ -106,23 +105,26 @@ def batch_parse(
         
         try:
             parsed_skill = parse_skill(str(skill_dir))
-            knowledge_entry = generate_knowledge_entry(parsed_skill)
             
-            if output_path:
-                entry_file = output_path / f"{skill_name}.json"
-                entry_file.write_text(
-                    json.dumps(knowledge_entry, indent=2),
-                    encoding='utf-8'
-                )
+            playbook_md = generate_devin_playbook(parsed_skill)
+            knowledge_md = generate_devin_knowledge(parsed_skill)
             
-            if integrate:
-                integrate_skill(knowledge_entry)
+            playbook_file = playbooks_dir / f"{parsed_skill['name']}-playbook.md"
+            knowledge_file = knowledge_dir / f"{parsed_skill['name']}-knowledge.md"
+            
+            playbook_file.write_text(playbook_md, encoding='utf-8')
+            knowledge_file.write_text(knowledge_md, encoding='utf-8')
             
             results['parsed'] += 1
             results['skills'].append({
-                'name': skill_name,
+                'name': parsed_skill['name'],
                 'status': 'success',
                 'description': parsed_skill['description'][:100]
+            })
+            results['generated_files'].append({
+                'skill': parsed_skill['name'],
+                'playbook': str(playbook_file),
+                'knowledge': str(knowledge_file)
             })
             
         except Exception as e:
@@ -154,7 +156,16 @@ def print_results(results: dict) -> None:
     if results['skills']:
         print("Parsed skills:")
         for skill in results['skills']:
-            print(f"  - {skill['name']}: {skill['description'][:50]}...")
+            desc = skill['description'][:50] if len(skill['description']) > 50 else skill['description']
+            print(f"  - {skill['name']}: {desc}...")
+        print()
+    
+    if results['generated_files']:
+        print("Generated files:")
+        for files in results['generated_files']:
+            print(f"  {files['skill']}:")
+            print(f"    - Playbook: {files['playbook']}")
+            print(f"    - Knowledge: {files['knowledge']}")
         print()
     
     if results['errors']:
@@ -166,20 +177,15 @@ def print_results(results: dict) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Parse multiple Anthropic Skills directories at once'
+        description='Parse multiple Anthropic Skills and generate Devin playbooks/knowledge'
     )
     parser.add_argument(
         'skills_directory',
         help='Path to the directory containing skill subdirectories'
     )
     parser.add_argument(
-        '--output', '-o',
-        help='Output directory for parsed knowledge entries'
-    )
-    parser.add_argument(
-        '--integrate',
-        action='store_true',
-        help='Integrate all skills into Devin\'s knowledge system'
+        '--output-dir', '-o',
+        help='Output directory for generated markdown files (default: current directory)'
     )
     parser.add_argument(
         '--stop-on-error',
@@ -200,17 +206,17 @@ def main():
         
         results = batch_parse(
             args.skills_directory,
-            output_dir=args.output,
-            integrate=args.integrate,
+            output_dir=args.output_dir,
             continue_on_error=not args.stop_on_error
         )
         
         if not args.quiet:
             print_results(results)
         
-        if args.integrate and results['parsed'] > 0:
-            print("Skills have been added to Devin's knowledge system.")
-            print("You can now use these skills by mentioning them in your requests.")
+        if results['parsed'] > 0:
+            print("You can now add these files to Devin:")
+            print("  - Add files from 'playbooks/' directory as Devin playbooks")
+            print("  - Add files from 'knowledge/' directory as Devin knowledge")
         
         return 0 if results['success'] else 1
         
